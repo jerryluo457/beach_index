@@ -1,5 +1,5 @@
 # Beach Index — Palm Beach County
-![Project Banner](./project_banner.png)
+![Project Banner](./banner_7.png)
 A local-first beach conditions dashboard for four Palm Beach County beaches. It
 scrapes public beach cam frames, runs three computer-vision models over them
 (sargassum coverage, water severity, crowd count), blends the results with live
@@ -9,7 +9,7 @@ Index** per beach through a React dashboard.
 Beaches covered: Jupiter Inlet, Lake Worth Inlet, Boynton Inlet, and Boca Raton
 (Spanish River Park).
 
-![Project Banner](./banner_2.png)
+![Project Banner](./banner_8.png)
 ![Project Banner](./banner_5.png)
 
 ---
