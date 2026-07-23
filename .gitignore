@@ -1,0 +1,22 @@
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ── Node ─────────────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+
+# ── Runtime data (regenerated on first boot / first poll) ────────────────
+backend/data/
+data/*.zip
+
+# ── Editor / OS ──────────────────────────────────────────────────────────
+.DS_Store
+.vscode/
+.claude/
+.env

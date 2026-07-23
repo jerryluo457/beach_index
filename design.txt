@@ -1,0 +1,40 @@
+sargassum-beach-app/
+│
+├── README.md                  # project overview, setup, results
+├── .gitignore                 # excludes node_modules, .pt files, __pycache__, .env
+├──  design.txt                 # this file
+│
+├── frontend/                  # React + Vite single-page app
+│   ├── package.json           # dependencies + npm scripts
+│   ├── vite.config.js         # dev server / build config
+│   ├── index.html             # single HTML shell the app mounts into
+│   ├── eslint.config.js       # linting rules
+│   ├── public/                # static assets served as-is
+│   └── src/
+│       ├── main.jsx           # entry point — mounts <App/> into index.html
+│       ├── App.jsx            # routing table: / and /beach/:id
+│       ├── api.js             # ALL backend calls + MOCK flag (single boundary)
+│       ├── index.css          # global styles
+│       ├── pages/             # full screens, one per route
+│       │   ├── Home.jsx       # banner + ranked cards + map, owns hover state
+│       │   └── BeachDetail.jsx# single-beach deep view at /beach/:id
+│       └── components/        # reusable UI pieces
+│           ├── RecommendationBanner.jsx  # "Best right now: X"
+│           ├── BeachCard.jsx             # one beach summary, colored by index
+│           └── BeachMap.jsx              # MapLibre map, markers synced to cards
+│
+├── backend/                   # FastAPI inference + scoring API
+│   ├── main.py                # FastAPI app, endpoints, loads models at startup
+│   ├── inference.py           # U-Net load + predict + coverage % computation
+│   ├── scoring.py             # index math: sub-scores + geometric-mean aggregate
+│   ├── sources.py             # external data: NWS weather, NOAA tides
+│   ├── requirements.txt       # Python dependencies
+│   ├── Dockerfile             # containerized deployment
+│   └── models/                # trained weights (gitignored — too large)
+│       ├── best.pt            # sand sargassum segmenter (U-Net, IoU 0.33)
+│       └── water_best.pt      # water severity classifier (beta)
+│
+│
+└── data/                      # gitignored — local only
+    ├── images/                # beach cam frames
+    └── masks/                 # CVAT-exported segmentation masks

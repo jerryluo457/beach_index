@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd job for poller.py — scrapes the newest beach cam frame hourly.
+
+  NOT INSTALLED AUTOMATICALLY. To activate:
+
+      cp backend/com.sargassum.poller.plist ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.sargassum.poller.plist
+
+  To check on it / stop it:
+
+      launchctl list | grep sargassum
+      tail -f /Users/jerryluo/Desktop/sargassum_beach_app/backend/data/poller.log
+      launchctl unload ~/Library/LaunchAgents/com.sargassum.poller.plist
+
+  WorkingDirectory matters: main.py resolves "data/" and "models/" relative to
+  the process's cwd, so the job must start in backend/ or it will build a fresh
+  empty database somewhere else and fail to find the model weights.
+
+  The hours below stop at 19 because the cameras publish nothing overnight.
+  poller.py enforces the same window itself, so a stray run outside it is
+  harmless — this list just avoids waking the machine for no reason.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sargassum.poller</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jerryluo/Desktop/sargassum_beach_app/backend/.venv/bin/python</string>
+        <string>poller.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jerryluo/Desktop/sargassum_beach_app/backend</string>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>15</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>5</integer></dict>
+        <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>5</integer></dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jerryluo/Desktop/sargassum_beach_app/backend/data/poller.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jerryluo/Desktop/sargassum_beach_app/backend/data/poller.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

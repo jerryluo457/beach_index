@@ -1,0 +1,25 @@
+{
+    "name": "beach-app",
+    "private": true,
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview",
+        "lint": "eslint .",
+        "test": "node src/score.test.js"
+    },
+    "dependencies": {
+        "maplibre-gl": "^4.5.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "react-map-gl": "^7.1.7",
+        "react-router-dom": "^6.26.0"
+    },
+    "devDependencies": {
+        "@vitejs/plugin-react": "^4.3.1",
+        "eslint": "^9.9.0",
+        "vite": "^8.1.5"
+    }
+}
