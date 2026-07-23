@@ -1,5 +1,5 @@
 # Beach Index — Palm Beach County
-
+![Project Banner](./project_banner.png)
 A local-first beach conditions dashboard for four Palm Beach County beaches. It
 scrapes public beach cam frames, runs three computer-vision models over them
 (sargassum coverage, water severity, crowd count), blends the results with live
