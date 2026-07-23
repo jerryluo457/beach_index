@@ -9,6 +9,9 @@ Index** per beach through a React dashboard.
 Beaches covered: Jupiter Inlet, Lake Worth Inlet, Boynton Inlet, and Boca Raton
 (Spanish River Park).
 
+![Project Banner](./banner_2.png)
+![Project Banner](./banner_3.png)
+
 ---
 
 ## Table of contents
