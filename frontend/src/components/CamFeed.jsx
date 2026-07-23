@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { mediaUrl } from '../api.js'
+import { ingestAge, mediaUrl, MOCK, POLLABLE, pollBeach } from '../api.js'
 
 /**
  * CamFeed — the latest ingested frame with model overlays.
@@ -35,9 +35,41 @@ function Toggle({ active, onClick, swatch, children, disabled }) {
   )
 }
 
-export default function CamFeed({ beach }) {
+export default function CamFeed({ beach, onRefreshed }) {
   const [showSargassum, setShowSargassum] = useState(true)
   const [showCrowd, setShowCrowd] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState(null)
+  const [refreshNote, setRefreshNote] = useState(null)
+
+  const age = ingestAge(beach.updated_at)
+  const canRefresh = !MOCK && POLLABLE.includes(beach.id) && typeof onRefreshed === 'function'
+
+  async function refresh() {
+    setRefreshing(true)
+    setRefreshError(null)
+    setRefreshNote(null)
+    try {
+      const res = await pollBeach(beach.id)
+      if (res.status === 'failed') {
+        // The scrape broke but the stored frame is untouched, so say so and
+        // leave the image up rather than blanking the panel.
+        setRefreshError('scrape failed — showing the last stored frame')
+      } else if (res.status === 'unchanged') {
+        // A successful refresh with nothing to show for it. Saying so is the
+        // difference between "the camera is quiet" and "the button is broken".
+        setRefreshNote('already the newest frame the camera has published')
+      }
+      // Refetch through the page's own loader instead of patching `beach`
+      // here: the timestamp, the stale flag and the index all have to move
+      // together, and they only agree if they come from one response.
+      await onRefreshed()
+    } catch (err) {
+      setRefreshError(err.message)
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   // Unsupported beaches: point at the county feed instead.
   if (!beach.supported) {
@@ -66,6 +98,12 @@ export default function CamFeed({ beach }) {
           No frame ingested yet for {beach.name}. The hourly poller stores one during
           daylight hours, or you can submit one from the ingest console.
         </p>
+        {canRefresh && (
+          <button type="button" className="linklike" onClick={refresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Fetch one now'}
+          </button>
+        )}
+        {refreshError && <p className="refresh-error">{refreshError}</p>}
       </div>
     )
   }
@@ -115,10 +153,35 @@ export default function CamFeed({ beach }) {
           )}
         </Toggle>
 
-        <span className="camfeed__meta">
-          {beach.updated_at ? new Date(beach.updated_at).toLocaleString() : ''}
+        {/* This panel is the one people compare against the camera's own
+            slideshow page, so it must never imply the frame is live. Anything
+            older than two poll cycles says so out loud. */}
+        <span className={`camfeed__meta${age?.isStale ? ' is-stale' : ''}`}>
+          {age ? (age.isStale ? `Last frame ${age.label} — not live` : age.label) : ''}
         </span>
+
+        {canRefresh && (
+          <button
+            type="button"
+            className="linklike"
+            onClick={refresh}
+            disabled={refreshing}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        )}
       </div>
+
+      {refreshError && (
+        <p className="refresh-error" role="status">
+          {refreshError}
+        </p>
+      )}
+      {refreshNote && (
+        <p className="refresh-note" role="status">
+          {refreshNote}
+        </p>
+      )}
 
       <p className="camfeed__caption">
         Model output, not ground truth. The crowd counter misses people near the horizon

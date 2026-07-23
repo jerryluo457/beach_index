@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import Speedometer from '../components/Speedometer.jsx'
 import CamFeed from '../components/CamFeed.jsx'
 import ForecastTimeline from '../components/ForecastTimeline.jsx'
-import { fetchBeach, FEATURES } from '../api.js'
+import { fetchBeach, FEATURES, ingestAge } from '../api.js'
 import {
   SCORE_BANDS,
   formatScore,
@@ -129,6 +129,16 @@ export default function BeachDetail() {
     }
   }, [id])
 
+  // Handed to CamFeed so a manual re-poll refreshes this page from the server
+  // rather than from a patched-up local copy of `beach`. Deliberately does NOT
+  // set status back to 'loading': the panel should update in place, not tear
+  // the whole page down to a spinner.
+  const reload = useCallback(async () => {
+    setBeach(await fetchBeach(id))
+  }, [id])
+
+  const age = ingestAge(beach?.updated_at)
+
   if (status === 'loading') return <div className="shell"><p className="state">Loading station…</p></div>
   if (status === 'error') {
     return (
@@ -203,9 +213,12 @@ export default function BeachDetail() {
                   : beach.crowd_label
               }
             />
+            {/* Same wording as the masthead and the cam panel — three places
+                showing the same timestamp in three formats was how a stale
+                reading went unnoticed in the first place. */}
             <Fact
               label="Last ingest"
-              value={beach.updated_at ? new Date(beach.updated_at).toLocaleString() : 'Never'}
+              value={age ? `${age.label}${age.isStale ? ' · stale' : ''}` : 'Never'}
             />
           </div>
 
@@ -284,7 +297,7 @@ export default function BeachDetail() {
               {beach.supported ? 'model overlays' : 'external source'}
             </span>
           </div>
-          <CamFeed beach={beach} />
+          <CamFeed beach={beach} onRefreshed={reload} />
         </>
       )}
 

@@ -156,6 +156,68 @@ input {
   white-space: nowrap;
 }
 
+/* STALE READINGS — amber, matching .advisory[data-risk='moderate'], NOT the
+   red used for errors. A stale frame is a caveat about how old the data is;
+   nothing has actually broken from the reader's point of view, and dressing it
+   as a failure would make the real error states mean less.
+   Written with the parent selector because .masthead__meta dd already sets a
+   colour at higher specificity than a lone class could override. */
+.masthead__meta dd.is-stale,
+.camfeed__meta.is-stale {
+  color: #d97706;
+}
+
+/* A button that reads as a link. Deliberately not an <a href="#">: this
+   performs an action rather than navigating, and a real button keeps the
+   keyboard and screen-reader behaviour correct for free. */
+.linklike {
+  margin-left: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: inherit;
+  color: var(--ink-mute);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.linklike:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.linklike:disabled {
+  cursor: default;
+  opacity: 0.55;
+  text-decoration: none;
+}
+
+.refresh-error {
+  margin-left: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #98291c;
+}
+
+/* A successful refresh that found nothing new. Muted, not amber: the system
+   worked exactly as intended, there was simply no newer frame. */
+.refresh-note {
+  margin: 4px 0 0;
+  padding: 0 14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+}
+
+/* In the cam panel it is a block <p> under the controls row, so it needs the
+   same 14px gutter the caption below it uses rather than an inline offset. */
+p.refresh-error {
+  margin: 4px 0 0;
+  padding: 0 14px;
+  white-space: normal;
+}
+
 .back-link {
   display: inline-flex;
   align-items: center;

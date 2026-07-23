@@ -1,4 +1,3 @@
-#this file is created with the help of Claude Opus, however the software is manually verified and debugged.
 """
 sources.py — External data fetchers (NWS weather, NOAA tides & water temp)
 

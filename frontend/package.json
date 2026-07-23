@@ -8,7 +8,7 @@
         "build": "vite build",
         "preview": "vite preview",
         "lint": "eslint .",
-        "test": "node src/score.test.js"
+        "test": "node src/score.test.js && node src/api.test.js"
     },
     "dependencies": {
         "maplibre-gl": "^4.5.0",

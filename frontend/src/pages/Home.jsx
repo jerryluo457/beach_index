@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import BeachCard from '../components/BeachCard.jsx'
 import BeachMap from '../components/BeachMap.jsx'
-import { fetchBeaches, MOCK } from '../api.js'
+import { fetchBeaches, ingestAge, MOCK, POLLABLE, pollBeach } from '../api.js'
 
 /**
  * Home — the dashboard: four cards in a row, full-width map beneath.
@@ -34,6 +34,8 @@ export default function Home() {
   const [status, setStatus] = useState('loading')
   const [error, setError] = useState(null)
   const [activeId, setActiveId] = useState(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -53,11 +55,42 @@ export default function Home() {
     }
   }, [])
 
+  /**
+   * Scrape both cameras now, then re-read /beaches.
+   *
+   * allSettled, not all: one dead camera must not throw away the frame the
+   * other one just fetched. The reload runs regardless, for the same reason —
+   * if either poll landed, the page should show it.
+   */
+  const refresh = useCallback(async () => {
+    setRefreshing(true)
+    setRefreshError(null)
+    try {
+      const results = await Promise.allSettled(POLLABLE.map((id) => pollBeach(id)))
+      const failed = results
+        .map((r, i) => [POLLABLE[i], r])
+        .filter(([, r]) => r.status === 'rejected' || r.value?.status === 'failed')
+      if (failed.length === POLLABLE.length) {
+        const [, first] = failed[0]
+        setRefreshError(first.reason?.message ?? 'poll failed')
+      }
+      setBeaches(orderBeaches(await fetchBeaches()))
+    } catch (err) {
+      // The existing cards stay on screen: a failed refresh must degrade to
+      // stale data, never to a blank dashboard.
+      setRefreshError(err.message)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [])
+
   const lastUpdated = beaches
     .map((b) => b.updated_at)
     .filter(Boolean)
     .sort()
     .at(-1)
+
+  const age = ingestAge(lastUpdated)
 
   return (
     <div className="shell">
@@ -75,13 +108,26 @@ export default function Home() {
           </dl>
           <dl>
             <dt>Last ingest</dt>
-            <dd>
-              {lastUpdated
-                ? new Date(lastUpdated).toLocaleTimeString('en-US', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : '—'}
+            {/* The date is only omitted when the ingest IS from today — see
+                ingestAge() for why a bare time here was actively misleading. */}
+            <dd className={age?.isStale ? 'is-stale' : undefined}>
+              {age ? age.label : '—'}
+              {age?.isStale && ' · stale'}
+              {!MOCK && (
+                <button
+                  type="button"
+                  className="linklike"
+                  onClick={refresh}
+                  disabled={refreshing}
+                >
+                  {refreshing ? 'Refreshing…' : 'Refresh'}
+                </button>
+              )}
+              {refreshError && (
+                <span className="refresh-error" role="status">
+                  {refreshError}
+                </span>
+              )}
             </dd>
           </dl>
           <dl>

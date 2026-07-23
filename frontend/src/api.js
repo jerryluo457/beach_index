@@ -15,7 +15,12 @@
 export const MOCK = false
 
 // Vite proxies /api → http://127.0.0.1:8000 in dev (see vite.config.js).
-const BASE = import.meta.env.VITE_API_BASE ?? '/api'
+//
+// Optional-chained because `import.meta.env` is injected by Vite and is
+// undefined under plain Node — which is how api.test.js runs, following
+// score.test.js's zero-dependency convention. Without the `?.` merely
+// importing this module to test a pure function throws.
+const BASE = import.meta.env?.VITE_API_BASE ?? '/api'
 
 /**
  * Backend-relative media path ("/media/foo.jpg") → a URL this page can load.
@@ -33,6 +38,60 @@ export function mediaUrl(path) {
 
 /** Sargassum model is only validated on these two cameras. */
 export const SARGASSUM_SUPPORTED = ['lake-worth', 'boynton']
+
+/** Beaches the poller can scrape — mirrors poller.py's CAMS dict. */
+export const POLLABLE = ['lake-worth', 'boynton']
+
+// ─────────────────────────────────────────────────────────────────────────
+// INGEST AGE
+// ─────────────────────────────────────────────────────────────────────────
+// Two missed hourly polls. One transient failure is normal and shouldn't cry
+// wolf; two in a row means the frame on screen no longer describes the beach.
+export const STALE_AFTER_MS = 2 * 60 * 60 * 1000
+
+const TIME_ONLY = new Intl.DateTimeFormat('en-US', {
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+const DATE_AND_TIME = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+/**
+ * How old a stored reading is, and how to write it down.
+ *
+ * WHY THE DATE IS CONDITIONAL — this fixes a real misreading. The masthead used
+ * to print `updated_at` as time-only next to a "Reading" line showing today's
+ * date, so a frame ingested at 7:05 PM the previous evening rendered as
+ * "Thursday, July 23 · 07:05 PM": not just stale, but apparently from ten hours
+ * in the future. Any ingest that isn't from today MUST carry its date.
+ *
+ * Returns null for a missing timestamp so callers can render their own em dash,
+ * which is different from "we have a timestamp and it's old".
+ */
+export function ingestAge(updatedAt, now = Date.now()) {
+  if (!updatedAt) return null
+  const date = new Date(updatedAt)
+  if (Number.isNaN(date.getTime())) return null
+
+  const today = new Date(now)
+  const isToday =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+
+  return {
+    date,
+    isToday,
+    ageMs: now - date.getTime(),
+    isStale: now - date.getTime() > STALE_AFTER_MS,
+    label: isToday ? TIME_ONLY.format(date) : DATE_AND_TIME.format(date),
+  }
+}
 
 /** Beach ids + display names, mirroring sources.py's BEACHES dict. */
 export const BEACH_OPTIONS = [
@@ -234,4 +293,30 @@ export async function ingestBeach(beachId, file) {
   const form = new FormData()
   form.append('file', file)
   return request(`/ingest/${beachId}`, { method: 'POST', body: form })
+}
+
+/**
+ * POST /poll/{beachId} → { beach_id, status, updated_at, ... }
+ *
+ * Scrapes the newest cam frame on demand, the same way the hourly launchd job
+ * does. Exists because a broken scheduler is invisible from the dashboard: the
+ * page keeps serving the last good reading, so without this the only recovery
+ * is a terminal.
+ *
+ * `status` is the poller's own verdict — "ingested" | "skipped" | "failed".
+ * "skipped" is not an error; it means the camera has published nothing new.
+ *
+ * Runs the same synchronous inference as ingestBeach, so it is slow by design
+ * (10-15s). Never give it a timeout short enough to kill a real run.
+ */
+export async function pollBeach(beachId) {
+  if (MOCK) {
+    await delay(1800)
+    return {
+      beach_id: beachId,
+      status: 'ingested',
+      updated_at: new Date().toISOString(),
+    }
+  }
+  return request(`/poll/${beachId}`, { method: 'POST' })
 }

@@ -1,4 +1,3 @@
-#this file is created with the help of Claude Opus, however the software is manually verified and debugged.
 """
 main.py — FastAPI application
 
@@ -39,6 +38,7 @@ from pathlib import Path
 from typing import Optional
 
 import cv2
+import httpx
 import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -829,6 +829,81 @@ async def ingest(beach_id: str, file: UploadFile = File(...)):
         water_severity=result.get("water_severity"),
         stored_at=result["taken_at"],
     )
+
+
+@app.post("/poll/{beach_id}")
+async def poll_now(beach_id: str):
+    """Scrape the newest cam frame for one beach, right now.
+
+    WHY THIS EXISTS: the hourly scrape runs under launchd, and a broken
+    scheduler is INVISIBLE from the dashboard — every endpoint keeps happily
+    serving the last stored reading, so a stalled poller looks exactly like a
+    working one until you notice the cam feed no longer matches the real
+    beach. (It happened: the project directory was renamed, launchd kept
+    reporting exit 78 to nobody, and the page served a 14-hour-old frame as
+    though it were current.) This gives the UI a recovery path that isn't a
+    terminal.
+
+    Delegates to poller.poll_beach with NO changes to it, so a manual refresh
+    and a cron refresh scrape, dedup, ingest and snapshot along the exact same
+    code path. Two implementations of "get the newest frame" would drift.
+
+    force=True is hardcoded rather than exposed as a query parameter: a person
+    pressing a refresh link has explicitly asked for a scrape, so neither the
+    daylight-window guard nor the "same stem as last time" skip should turn it
+    into a silent no-op.
+
+    SYNCHRONOUS, 10-15s, for the same reason /ingest is — see that docstring.
+
+    Returns poll_beach's verdict, with ONE substitution:
+      "ingested"  — a genuinely newer frame was stored
+      "unchanged" — the scrape worked, but the camera has published nothing
+                    since the last reading
+      "failed"    — the scrape or the models failed; the previous reading is
+                    untouched, which is the whole degrade-to-stale contract
+
+    "unchanged" exists because force=True bypasses poll_beach's own dedup, so
+    it reports "ingested" for a re-run of the SAME frame. That is true but
+    useless to a caller: "your refresh worked and there is nothing new" and
+    "your refresh worked and here is a new frame" have to be distinguishable,
+    or the UI has to lie about one of them. Comparing source_stem across the
+    call is the honest way to tell them apart without touching poll_beach.
+
+    poll_beach never raises, so there is nothing to catch here.
+    """
+    # LOCAL IMPORT, DELIBERATELY. poller.py imports run_ingest/get_db/
+    # snapshot_index from this module at import time, so `import poller` at the
+    # top of main.py is a circular import that fails at startup.
+    from poller import CAMS, USER_AGENT, HTTP_TIMEOUT, poll_beach
+
+    if beach_id not in CAMS:
+        # Not a transient failure — Jupiter and Boca have no camera at all.
+        raise HTTPException(
+            status_code=404,
+            detail=f"No camera to poll for '{beach_id}' — cameras: {sorted(CAMS)}",
+        )
+
+    before = latest_reading(beach_id)
+    before_stem = before.get("source_stem") if before else None
+
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT,
+                                 headers={"User-Agent": USER_AGENT},
+                                 follow_redirects=True) as client:
+        status = await poll_beach(client, beach_id, force=True)
+
+    reading = latest_reading(beach_id)
+    stem = reading.get("source_stem") if reading else None
+    if status == "ingested" and stem is not None and stem == before_stem:
+        status = "unchanged"
+
+    return {
+        "beach_id": beach_id,
+        "status": status,
+        # Post-poll timestamp, so the client can confirm the frame actually
+        # moved rather than trusting the status string alone.
+        "updated_at": reading["taken_at"] if reading else None,
+        "source_stem": stem,
+    }
 
 
 @app.get("/history/{beach_id}")

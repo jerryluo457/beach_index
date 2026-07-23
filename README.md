@@ -312,6 +312,7 @@ Base URL in development: `http://127.0.0.1:8000`.
 | `GET` | `/beaches` | Every beach with its current index. Backs the home page. |
 | `GET` | `/beach/{beach_id}` | One beach in full. Backs `/beach/:id`. 404 on unknown id. |
 | `POST` | `/ingest/{beach_id}` | Multipart upload of a cam frame. Runs all three models, stores the reading. Synchronous, several seconds. |
+| `POST` | `/poll/{beach_id}` | Scrape the newest cam frame now, the same way the hourly job does. Backs the "Refresh" link. 404 for beaches with no camera. Synchronous, several seconds. |
 | `GET` | `/history/{beach_id}?limit=30` | Past readings, oldest first. Backs the forecast timeline. |
 | `GET` | `/media/{filename}` | Static mount over `data/uploads` — stored frames and overlay PNGs. |
 
@@ -399,11 +400,29 @@ launchctl unload ~/Library/LaunchAgents/com.sargassum.poller.plist
 The job's `WorkingDirectory` must be `backend/` for the same reason you start
 uvicorn from there.
 
+The middle column of `launchctl list | grep sargassum` is the last exit status.
+It must be `0`. A **78** there means launchd could not spawn the interpreter —
+almost always because the project moved and the installed plist still points at
+the old path. Every path in the plist is absolute, so **renaming or moving the
+project silently kills the poller**: launchd keeps the job loaded, writes a
+zero-byte log at the dead path, and tells nobody. The dashboard goes on serving
+the last stored reading, which looks exactly like a working poller until you
+compare the cam panel against the camera's own page. After any move, re-copy the
+plist, unload/load it, and check that status column.
+
+Two things now make that failure visible rather than silent:
+
+- Any reading older than two poll cycles is labelled **stale** in amber, and any
+  reading not from today carries its date, in the masthead and the cam panel.
+- The **Refresh** link beside those timestamps calls `POST /poll/{beach_id}` and
+  scrapes on demand, so recovering does not require a terminal.
+
 ---
 
 ## Tests
 
-Frontend — the scoring bands, run under the Node test runner:
+Frontend — the scoring bands (`score.test.js`) and the ingest-staleness helper
+(`api.test.js`), run under the Node test runner:
 
 ```bash
 cd frontend && npm test

@@ -10,12 +10,26 @@
   To check on it / stop it:
 
       launchctl list | grep sargassum
-      tail -f /Users/jerryluo/Desktop/sargassum_beach_app/backend/data/poller.log
+      tail -f /Users/jerryluo/Desktop/sargassum_beach_app_download/backend/data/poller.log
       launchctl unload ~/Library/LaunchAgents/com.sargassum.poller.plist
 
   WorkingDirectory matters: main.py resolves "data/" and "models/" relative to
   the process's cwd, so the job must start in backend/ or it will build a fresh
   empty database somewhere else and fail to find the model weights.
+
+  EVERY PATH BELOW IS ABSOLUTE, so MOVING OR RENAMING THE PROJECT SILENTLY KILLS
+  THE JOB. This already happened once: the project moved to
+  ..._download/ while the installed copy still pointed at the old
+  directory. launchd kept the job loaded and reported exit 78 (EX_CONFIG — it
+  could not spawn the interpreter), created a ZERO-BYTE poller.log at the dead
+  path, and mailed nobody. The only visible symptom was the dashboard quietly
+  serving the last frame from before the move. After ANY move, re-copy this file
+  to ~/Library/LaunchAgents and unload/load it, then confirm the middle column of
+  `launchctl list | grep sargassum` is 0 rather than 78.
+
+  Use .venv/bin/python specifically. .venv/bin/python3.14 is a leftover symlink
+  to the Homebrew interpreter and resolves OUTSIDE the venv, where ultralytics
+  is not installed.
 
   The hours below stop at 19 because the cameras publish nothing overnight.
   poller.py enforces the same window itself, so a stray run outside it is
@@ -28,12 +42,12 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/jerryluo/Desktop/sargassum_beach_app/backend/.venv/bin/python</string>
+        <string>/Users/jerryluo/Desktop/sargassum_beach_app_download/backend/.venv/bin/python</string>
         <string>poller.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/jerryluo/Desktop/sargassum_beach_app/backend</string>
+    <string>/Users/jerryluo/Desktop/sargassum_beach_app_download/backend</string>
 
     <key>StartCalendarInterval</key>
     <array>
@@ -54,9 +68,9 @@
     </array>
 
     <key>StandardOutPath</key>
-    <string>/Users/jerryluo/Desktop/sargassum_beach_app/backend/data/poller.log</string>
+    <string>/Users/jerryluo/Desktop/sargassum_beach_app_download/backend/data/poller.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/jerryluo/Desktop/sargassum_beach_app/backend/data/poller.log</string>
+    <string>/Users/jerryluo/Desktop/sargassum_beach_app_download/backend/data/poller.log</string>
 
     <key>RunAtLoad</key>
     <false/>
