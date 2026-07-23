@@ -82,6 +82,29 @@ function SubScoreBar({ value }) {
   )
 }
 
+// The three sub-scores that come from a cam frame rather than a public feed.
+// For these, "missing" has two very different causes worth telling apart.
+const CAMERA_SUBSCORES = ['sargassum', 'water', 'crowd']
+
+/**
+ * What to say when a sub-score has no value.
+ *
+ * The old copy said "No signal for this beach" for every gap, which is only
+ * true for the beaches that have no camera. On a beach that DOES have one, the
+ * same sentence quietly misattributed a broken model to a missing feature —
+ * which is exactly what a dead crowd counter looked like for hours: an em dash
+ * and a line implying the app was never going to show that number here.
+ */
+function missingBlurb(key, beach) {
+  if (CAMERA_SUBSCORES.includes(key) && !beach.supported) {
+    return 'No analysed camera for this beach — excluded from the index.'
+  }
+  if (CAMERA_SUBSCORES.includes(key)) {
+    return 'Not measured in the latest frame — the model did not return a value. Excluded from the index.'
+  }
+  return 'Feed unavailable right now — excluded from the index.'
+}
+
 function Fact({ label, value }) {
   const absent = value === null || value === undefined || value === ''
   return (
@@ -208,8 +231,11 @@ export default function BeachDetail() {
             <Fact
               label="Crowd"
               value={
+                // != null, not truthiness: a count of 0 is a real measurement
+                // (an empty beach), and `0 ? … : …` would report it as "no
+                // reading" — the same trap the UV index already documents.
                 beach.crowd_count != null
-                  ? `${beach.crowd_count} people · ${beach.crowd_label ?? '—'}`
+                  ? `${beach.crowd_count} ${beach.crowd_count === 1 ? 'person' : 'people'} · ${beach.crowd_label ?? '—'}`
                   : beach.crowd_label
               }
             />
@@ -262,7 +288,7 @@ export default function BeachDetail() {
               </div>
               <SubScoreBar value={value} />
               <p className="subscore__blurb">
-                {has ? sub.blurb : 'No signal for this beach — excluded from the index.'}
+                {has ? sub.blurb : missingBlurb(sub.key, beach)}
               </p>
             </article>
           )

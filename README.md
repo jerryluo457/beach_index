@@ -308,10 +308,10 @@ Base URL in development: `http://127.0.0.1:8000`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/` | Health check. Reports which models loaded and which beaches exist. |
+| `GET` | `/` | Health check. `status` is `degraded` when a model loaded but fails its self-test; `models_ok` and `model_errors` say which and why. |
 | `GET` | `/beaches` | Every beach with its current index. Backs the home page. |
 | `GET` | `/beach/{beach_id}` | One beach in full. Backs `/beach/:id`. 404 on unknown id. |
-| `POST` | `/ingest/{beach_id}` | Multipart upload of a cam frame. Runs all three models, stores the reading. Synchronous, several seconds. |
+| `POST` | `/ingest/{beach_id}` | Multipart upload of a cam frame. Runs all three models, stores the reading. Returns an `errors` object naming any model that failed. Synchronous, several seconds. |
 | `POST` | `/poll/{beach_id}` | Scrape the newest cam frame now, the same way the hourly job does. Backs the "Refresh" link. 404 for beaches with no camera. Synchronous, several seconds. |
 | `GET` | `/history/{beach_id}?limit=30` | Past readings, oldest first. Backs the forecast timeline. |
 | `GET` | `/media/{filename}` | Static mount over `data/uploads` — stored frames and overlay PNGs. |
@@ -565,6 +565,31 @@ directory. Start uvicorn from `backend/`, not from the repository root.
 **Every beach shows an index but no sargassum or crowd values.** The database
 has no readings yet. Run `python poller.py --force` or upload a frame at
 `/upload`.
+
+**Crowd (or any other model's) value is empty on a beach that HAS a camera.**
+Check `GET /` first. It reports `models_ok` and `model_errors` separately from
+`models_loaded`, and `status` is `degraded` when a model loaded but cannot
+actually run. `POST /ingest` and `POST /poll` also return an `errors` object
+naming the model and the exception. An empty column with no error is a real
+measurement of nothing — a beach with no people counts 0, not null.
+
+This distinction exists because of a bug worth remembering. SAHI picks its NMS
+backend lazily, preferring numba whenever the numba *distribution* is installed
+— without checking that it imports. On an environment where numba is present but
+incompatible with numpy (`Numba needs NumPy 2.1 or less. Got NumPy 2.4.`, the
+state of the system Anaconda install here), the crowd counter constructed
+successfully, reported healthy, and then threw on every single frame. Readings
+stored `crowd_count = NULL`, which the UI drew as the same em dash it uses for
+"this beach has no camera". The detector appeared to be finding no people when
+it was never running at all. `CrowdCounter.__init__` now pins the backend to
+numpy, and `self_test_models()` runs a probe frame through every model at boot
+so a load-succeeds-but-inference-fails model is caught at startup.
+
+**Backend behaves differently depending on how you started it.** Use the venv's
+interpreter explicitly — `.venv/bin/python -m uvicorn main:app --reload --port
+8000`. A bare `uvicorn` without activating the venv resolves to whatever is
+first on `PATH` (here, Anaconda's), which is a completely different set of
+installed packages from the one `requirements.txt` describes.
 
 **Jupiter and Boca never show sargassum.** Expected. The model is only validated
 on the Lake Worth and Boynton camera viewpoints, so those two report `None` by

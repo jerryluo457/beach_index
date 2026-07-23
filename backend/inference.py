@@ -387,6 +387,37 @@ class CrowdCounter:
         # Local import: these are heavy packages, and this keeps `import
         # inference` cheap for callers that only need the sargassum model.
         from sahi import AutoDetectionModel
+        from sahi.postprocess.backends import set_postprocess_backend
+
+        # PIN THE NMS BACKEND. Do not let SAHI auto-detect this.
+        #
+        # THE BUG THIS FIXES, because it is worth recognising again elsewhere:
+        # SAHI's resolve_backend() picks numba over numpy whenever
+        # is_available("numba") is true — and that check only asks whether the
+        # DISTRIBUTION is present, not whether it actually imports. On a machine
+        # where numba is installed but incompatible with the installed numpy
+        # (`Numba needs NumPy 2.1 or less. Got NumPy 2.4.` — exactly the state of
+        # the system Anaconda environment here), SAHI selects numba, then throws
+        # ImportError the first time it postprocesses a sliced prediction.
+        #
+        # The failure was invisible in the worst way. Construction succeeds, so
+        # load_models() reports "crowd model loaded" and /  listed it as healthy;
+        # the import only blows up later, inside count(), where run_ingest's
+        # per-model try/except swallowed it. Every reading stored crowd_count =
+        # NULL, which the UI renders as "—" — identical to a beach with no
+        # camera. The people detector looked like it was returning nothing when
+        # it was in fact never running.
+        #
+        # numpy is the right pin rather than a fallback-on-error: it is always
+        # available, the counts here are 0-50 boxes per frame (numba's JIT wins
+        # only on large prediction counts, and its first-call compile cost
+        # exceeds any saving at this size), and this device is "cpu" so the
+        # torchvision-on-CUDA path is unreachable anyway. Pinning also makes NMS
+        # tie-breaking deterministic across environments, which matters for the
+        # same reason INGEST_WIDTH is fixed in main.run_ingest: crowd counts are
+        # compared BETWEEN beaches, so they must not depend on which machine
+        # happened to run the model.
+        set_postprocess_backend("numpy")
 
         self.confidence = confidence
         self.model = AutoDetectionModel.from_pretrained(

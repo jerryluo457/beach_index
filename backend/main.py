@@ -106,6 +106,12 @@ INGEST_WIDTH = 1200
 
 ml: dict = {}   # holds loaded models, shared across all requests
 
+# Models that CONSTRUCTED but cannot actually run, name -> exception text.
+# Populated by self_test_models(); surfaced by GET /. Kept separate from `ml`
+# on purpose: the object is still there and run_ingest will still try it, so
+# that the per-run error it raises is reported for real rather than guessed at.
+ml_errors: dict[str, str] = {}
+
 
 def load_models():
     """Populate the `ml` registry. Idempotent — safe to call twice.
@@ -150,7 +156,67 @@ def load_models():
             # deterministic template, which is accurate either way.
             print(f"[models]   summarizer unavailable ({e}) — using templates")
 
+    self_test_models()
     return ml
+
+
+def self_test_models() -> dict[str, str]:
+    """Put one real image through every loaded model. Populates `ml_errors`.
+
+    WHY LOADING IS NOT ENOUGH. Constructing a model proves the weights file
+    exists; it does not prove inference works. The crowd counter proved that
+    the hard way: SAHI resolves its NMS backend on FIRST USE, and on an
+    environment where numba is installed but incompatible with numpy it picked
+    numba, constructed fine, reported healthy, and then threw ImportError on
+    every real frame for hours. The signal reaching the page was an em dash —
+    identical to a beach that simply has no camera.
+
+    So: run each model once, here, at boot, on a synthetic frame. A lazily
+    imported dependency, a shape mismatch, a missing runtime library — anything
+    that breaks inference rather than construction — now fails at startup with
+    the real exception, where it is visible, instead of on the first user-facing
+    ingest, where it is not.
+
+    Cheap enough to always run: one 320x240 probe is a single SAHI tile and a
+    single U-Net pass, fractions of a second against models that take seconds to
+    load. Never raises — a self-test that can crash the server is worse than the
+    bug it looks for.
+    """
+    import tempfile
+
+    ml_errors.clear()
+
+    # Mid-grey rather than zeros: a black frame is a degenerate input that some
+    # normalisation paths divide by. Grey exercises the ordinary code path.
+    probe_bgr = np.full((240, 320, 3), 128, np.uint8)
+    probe_rgb = cv2.cvtColor(probe_bgr, cv2.COLOR_BGR2RGB)
+
+    def record(name: str, fn):
+        if name not in ml:
+            return
+        try:
+            fn()
+        except Exception as e:
+            ml_errors[name] = f"{type(e).__name__}: {e}"
+            print(f"[models]   ⚠️  {name} LOADED BUT CANNOT RUN — "
+                  f"{type(e).__name__}: {e}")
+
+    record("sand", lambda: ml["sand"].predict(probe_rgb))
+    record("water", lambda: ml["water"].predict(probe_rgb))
+
+    # CrowdCounter takes a path, not an array, so the probe needs a real file.
+    if "crowd" in ml:
+        with tempfile.TemporaryDirectory() as tmp:
+            probe_path = str(Path(tmp) / "probe.jpg")
+            cv2.imwrite(probe_path, probe_bgr)
+            record("crowd", lambda: ml["crowd"].count(probe_path))
+
+    if ml_errors:
+        print(f"[models]   SELF-TEST FAILED for {sorted(ml_errors)} — "
+              f"these signals will be missing from every reading")
+    else:
+        print("[models]   self-test passed — all models can run")
+    return ml_errors
 
 
 @asynccontextmanager
@@ -325,6 +391,11 @@ class IngestResult(BaseModel):
     crowd_count: Optional[int]
     water_severity: Optional[str]
     stored_at: str
+    # {"crowd": "ImportError: Numba needs NumPy 2.1 or less...", ...}
+    # Empty when every model ran. A null field above means "not measured";
+    # this says WHY, which is the difference between an empty beach and a
+    # broken detector.
+    errors: dict[str, str] = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -612,12 +683,23 @@ async def assemble_beach(beach_id: str) -> BeachSummary:
 
 @app.get("/")
 def root():
-    """Health check. Also reports which models actually loaded — genuinely
-    useful in deployment, where a missing weights file otherwise fails
-    silently until the first ingest."""
+    """Health check. Reports which models loaded AND which can actually run.
+
+    `models_loaded` alone is not a health signal, which is the lesson from the
+    crowd counter: SAHI resolved its NMS backend lazily, so construction
+    succeeded, this endpoint said "crowd", and inference only threw hours later
+    on the first real frame. `models_ok` / `model_errors` come from
+    self_test_models(), which puts an actual image through each model at boot.
+
+    `status` is "ok" only when every loaded model passed. A monitor watching
+    this field now notices a broken model at startup instead of a user noticing
+    an em dash on the page.
+    """
     return {
-        "status": "ok",
+        "status": "ok" if not ml_errors else "degraded",
         "models_loaded": sorted(ml.keys()),
+        "models_ok": sorted(k for k in ml if k not in ml_errors),
+        "model_errors": ml_errors,
         "beaches": list(BEACHES.keys()),
     }
 
@@ -717,6 +799,26 @@ def run_ingest(beach_id: str, raw: bytes,
     result = {"taken_at": taken_at, "image_path": image_path,
               "source_stem": source_stem}
 
+    # Per-model failures, collected rather than only printed.
+    #
+    # WHY THIS EXISTS. Each model below is wrapped so that one failure doesn't
+    # discard the others' output — that part is right and stays. What was wrong
+    # is that a failure left NO TRACE a caller could see: the column stayed
+    # NULL, and NULL is exactly what "this beach has no camera" and "never
+    # ingested" also look like. A broken crowd counter and an empty beach were
+    # the same em dash on the page.
+    #
+    # That is precisely how the numba/numpy backend bug (see
+    # inference.CrowdCounter.__init__) went unnoticed: every reading stored
+    # crowd_count = NULL for hours while the log line scrolled past in a
+    # terminal nobody was reading. `errors` travels back through /ingest and
+    # /poll so the answer to "why is crowd empty?" is in the response.
+    errors: dict[str, str] = {}
+
+    def _failed(model: str, e: Exception):
+        errors[model] = f"{type(e).__name__}: {e}"
+        print(f"[ingest] {model} failed: {type(e).__name__}: {e}")
+
     # Each model in its own try/except: crowd counting failing shouldn't
     # discard a perfectly good sargassum reading from the same frame.
     if "sand" in ml and beach_id in SARGASSUM_SUPPORTED:
@@ -732,13 +834,20 @@ def run_ingest(beach_id: str, raw: bytes,
             # had no way to find it.
             result["mask_path"] = out["mask_path"]
         except Exception as e:
-            print(f"[ingest] sargassum failed: {e}")
+            _failed("sargassum", e)
+    elif beach_id in SARGASSUM_SUPPORTED:
+        # Supported beach, but the model never loaded. Distinct from the
+        # unsupported case below, which is a product decision rather than a
+        # fault, and must not be reported as one.
+        errors["sargassum"] = "model not loaded"
 
     if "water" in ml:
         try:
             result["water_severity"] = ml["water"].predict(rgb)["severity"]
         except Exception as e:
-            print(f"[ingest] water failed: {e}")
+            _failed("water", e)
+    else:
+        errors["water"] = "model not loaded"
 
     if "crowd" in ml:
         try:
@@ -750,9 +859,15 @@ def run_ingest(beach_id: str, raw: bytes,
             result["crowd_tier"] = out["tier"]
             result["crowd_overlay_path"] = out["boxes_path"]
         except Exception as e:
-            print(f"[ingest] crowd failed: {e}")
+            _failed("crowd", e)
+    else:
+        errors["crowd"] = "model not loaded"
 
     result["reading_id"] = save_reading(beach_id, result)
+    # Not persisted — `errors` describes this RUN, not the reading. The row
+    # itself is the honest record of what was measured: a column that did not
+    # get a value simply has none.
+    result["errors"] = errors
     return result
 
 
@@ -828,6 +943,7 @@ async def ingest(beach_id: str, file: UploadFile = File(...)):
         crowd_count=result.get("crowd_count"),
         water_severity=result.get("water_severity"),
         stored_at=result["taken_at"],
+        errors=result.get("errors", {}),
     )
 
 
@@ -886,10 +1002,11 @@ async def poll_now(beach_id: str):
     before = latest_reading(beach_id)
     before_stem = before.get("source_stem") if before else None
 
+    ingest_out: dict = {}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT,
                                  headers={"User-Agent": USER_AGENT},
                                  follow_redirects=True) as client:
-        status = await poll_beach(client, beach_id, force=True)
+        status = await poll_beach(client, beach_id, force=True, out=ingest_out)
 
     reading = latest_reading(beach_id)
     stem = reading.get("source_stem") if reading else None
@@ -903,6 +1020,10 @@ async def poll_now(beach_id: str):
         # moved rather than trusting the status string alone.
         "updated_at": reading["taken_at"] if reading else None,
         "source_stem": stem,
+        # A frame can ingest successfully while one model inside it fails.
+        # "ingested" plus a non-empty errors dict is a real and important
+        # state — it is what a broken crowd counter looks like.
+        "errors": ingest_out.get("errors", {}),
     }
 
 
@@ -919,6 +1040,13 @@ def get_history(beach_id: str, limit: int = 30):
     """
     if beach_id not in BEACHES:
         raise HTTPException(status_code=404, detail=f"Unknown beach '{beach_id}'")
+
+    # SQLite treats a NEGATIVE limit as "no limit at all", so ?limit=-1 silently
+    # returned the entire table instead of erroring or returning nothing. Clamp
+    # rather than 422: the caller asked for a chart, and an absurd number is
+    # worth serving sensibly. The upper bound keeps one request from pulling
+    # years of rows into a timeline that only draws a few dozen points.
+    limit = max(1, min(limit, 500))
 
     with get_db() as conn:
         rows = conn.execute("""

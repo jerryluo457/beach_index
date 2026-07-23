@@ -221,9 +221,18 @@ def last_stem(beach_id: str) -> str | None:
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────
 
-async def poll_beach(client: httpx.AsyncClient, beach_id: str, force: bool = False) -> str:
+async def poll_beach(client: httpx.AsyncClient, beach_id: str, force: bool = False,
+                     out: dict | None = None) -> str:
     """Poll one beach. Returns "ingested", "skipped" or "failed" — never raises,
-    so one broken camera can't stop the other from ingesting."""
+    so one broken camera can't stop the other from ingesting.
+
+    `out`, if given, is filled with run_ingest's full result dict — including
+    its per-model `errors`. The status string alone cannot express "the frame
+    was ingested but the crowd counter threw", and that is exactly the case
+    that needs reporting: main.poll_now passes an `out` so the API response can
+    say WHY a signal is missing. Optional so the cron path in main() below is
+    unchanged.
+    """
     cam = CAMS[beach_id]
     print(f"[poll] {beach_id}")
 
@@ -250,6 +259,12 @@ async def poll_beach(client: httpx.AsyncClient, beach_id: str, force: bool = Fal
 
         print(f"[poll]   fetched {len(r.content) // 1024} KB — running models")
         result = run_ingest(beach_id, r.content, source_stem=stem)
+        if out is not None:
+            out.update(result)
+        if result.get("errors"):
+            # Loud in the log too — this is the line whose absence let a dead
+            # crowd counter run for hours looking like an empty beach.
+            print(f"[poll]   MODEL ERRORS: {result['errors']}")
         # Record the blended index onto this row so the forecast timeline has a
         # real historical series. Without it /history returns the raw ML
         # signals but never the number the dashboard actually displays.
