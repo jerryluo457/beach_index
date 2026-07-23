@@ -1,3 +1,1 @@
-# Model weights are large binaries — stored in Git LFS, not in the object DB.
-# Requires `git lfs install` before cloning; see README.md.
 *.pt filter=lfs diff=lfs merge=lfs -text
